@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-
 import logging
 import argparse
 
@@ -10,6 +9,20 @@ import time
 import sys
 from datetime import datetime
 
+def chunk(iterable, chunk_size):
+    """Generate sequences of `chunk_size` elements from `iterable`."""
+    iterable = iter(iterable)
+    while True:
+        chunk = []
+        try:
+            for _ in range(chunk_size):
+                chunk.append(next(iterable))
+            yield chunk
+        except StopIteration:
+            if chunk:
+                yield chunk
+            break
+
 class TodoistConnection(object):
     """docstring for TodoistConnection"""
     def __init__(self, args, api, logging):
@@ -18,7 +31,7 @@ class TodoistConnection(object):
         self.api = api
         self.logging = logging
         self.label = None
-        
+
     def get_subitems(self, items, parent_item=None):
         """Search a flat item list for child items"""
         result_items = []
@@ -121,7 +134,7 @@ def main():
     conn = TodoistConnection(args, api, logging)
 
     conn.logging.debug('Syncing the current state from the API')
-    conn.api.sync(resource_types=['projects', 'labels', 'items'])
+    conn.api.sync()
 
     # Check the next action label exists
     labels = conn.api.labels.all(lambda x: x['name'] == args.label)
@@ -136,7 +149,7 @@ def main():
 
     while True:
         try:
-            conn.api.sync(resource_types=['projects', 'labels', 'items'])
+            conn.api.sync()
         except Exception as e:
             conn.logging.exception('Error trying to sync with Todoist API: %s' % str(e))
         else:
@@ -212,7 +225,10 @@ def main():
 
             conn.logging.debug('%d changes queued for sync... commiting if needed', len(conn.api.queue))
             if len(conn.api.queue):
-                conn.api.commit()
+                queue = conn.api.queue
+                for ch in chunk(queue, 100):
+                    conn.api.queue = ch
+                    conn.api.commit()
 
         if conn.args.onetime:
             break
